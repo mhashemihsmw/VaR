@@ -1,0 +1,108 @@
+#' VaR calculation
+#'
+#'
+#' @param sd_deviation vector of size 2; standard deviation of base & peak log returns.
+#' @param mean_returns vector of size 2; mean of base & peak log returns.
+#' @param open_position vector of size 2; hedged open position to base & peak.
+#' @param prices vector of size 2; current prices of base & peak.
+#' @param haltedauer integer;haltedauer.
+#' @param cov_return float; covariance between base and peak returns.
+#' @param alpha float;significance level.
+#'
+#' @return VaR
+var_mc <- function (sd_returns, 
+                    mean_returns, 
+                    open_position, 
+                    prices, 
+                    haltedauer, 
+                    cov_return, 
+                    alpha) {
+  
+  ###initiallizing
+  haltedauer <- haltedauer
+  z_alpha <- qnorm(1 - alpha)#
+  degf <- 44 - 2
+  t_alpha <- qt(1 -alpha,degf)
+  sim <- 10000
+  #base
+  sd_base <- sd_returns[1]
+  op_base <- open_position[1]
+  mean_base <- mean_returns[1]
+  #peak
+  sd_peak <- sd_returns[2]
+  op_peak <- open_position[2]
+  mean_peak <- mean_returns[2]
+  
+  #extra
+  sig <- matrix(c(sd_base^2,cov_return,cov_return,sd_peak^2),2,2)
+  current_value <- open_position*prices
+  op_all <- sum(open_position)
+  opb <- current_value[1]
+  opp <- current_value[2]
+  w <- opb + opp
+  portfolio_current_value <- sum(current_value)
+  pw <- abs(current_value/portfolio_current_value)
+  #---------------------------------------------------
+  #Classic----------------------------------------------------
+  #coded in plsql DB pkg_pms_tools.prc_get_var
+  var_pfm <- sign(w)* t_alpha*(opb*sd_base + opp*sd_peak)*sqrt(haltedauer)            
+  
+  # The true VaR
+  portfolio_sd <- sqrt((opb*sd_base)^2 + (opp*sd_peak)^2 + 2*cov_return*opb*opp)*sqrt(haltedauer)
+  var_final <- sign(w)*sum(current_value*mean_returns)*haltedauer + z_alpha*portfolio_sd
+  #---------------------------------------------------
+  ##Monte Carlo-----------------------------------------------
+  mcsim <- 1
+  varmc <- 1:mcsim
+  for (j in 1:mcsim) {
+    market_value <- list()
+    for (i in 1:sim) {
+      z <- rmvnorm(1,mean_returns,matrix(c(1,0,0,1),2,2))
+      z <- z%*%t(chol(sig))
+      part_1 <- (mean_returns - (sd_returns^2)/2)*haltedauer
+      market_value[[i]] <- sum(current_value*exp(part_1 + z*sqrt(haltedauer)))
+      
+    }
+    profit_loss <- -(portfolio_current_value - sort(unlist(market_value)))
+    profit_loss <- sort(profit_loss)
+    l <- floor(alpha*sim)
+    varmc[j] <- -profit_loss[l]
+  }
+  varmc <- mean(varmc)
+   
+ list(c('Current value of OP ', sign(w)*portfolio_current_value),
+      c('VaR classic         ', var_final),
+      c('VaR (MC)            ', varmc))
+}
+
+
+
+
+moment_z <- function (data1, data2) {
+  data <- list()
+  data[[1]] <- data1
+  data[[2]] <- data2
+  lg <- list()
+  for (i in 1:2) {
+    dat <- data[[i]]
+    dat<-as.numeric(gsub(",", ".", gsub("\\.", "", dat)))
+    ld <- length(dat)
+    dat1 <- dat[-1]
+    dat2 <- dat[-ld]
+    log_rend <- log(dat1/dat2)
+    #print(log_rend)
+    mz <- mean(log_rend)
+    sdz <- sd(log_rend)
+    print(c(paste('average ', i, ": "), mz))
+    print(c(paste('sd ', i, ": "), sdz))
+    lg[[i]] <- log_rend
+  }
+  covz <- cov(lg[[1]], lg[[2]])
+  c('covariance: ', covz)
+  
+  #corz <- covz/prod(sdz)
+  #corz
+  
+}
+
+
